@@ -38,5 +38,30 @@ class CacheBase(object):
         :param noreply: instruct the server to not reply.
         :returns: whether the key been deleted.
         :rtype: boolean
+
+        TODO: __del__
         """
         return True
+
+    def get_values(self, *keys):
+        """Get valeus by keys
+        
+        foo, bar = cache.get_values('foo', 'bar')
+        
+        Share same error handling with :meth:`get`
+        :param keys: the function acception multiple keys as positional arguments
+        """
+        key_to_value = self.get_key_to_value(*keys)
+        return [key_to_value.get(k) for k in keys]
+
+    def get_key_to_value(self, *keys):
+        """Like :meth:`get_values` but return a dict::
+        if the given key is missing, it will be missing from the response dict.
+
+            d = cache.get_key_to_value('foo', 'bar')
+            foo = d['foo']
+            bar = d['bar']
+
+        :param keys: The function accepts multiple keys as positional arguments
+        """
+        return dict([(k, self.get(k)) for k in keys])

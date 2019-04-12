@@ -110,3 +110,47 @@ class CacheBase(object):
             if not self.set(k, v, timeout):
                 res = False
         return res
+
+    def delete_many(self, noreply=False, *keys):
+        """Delete multiple keys at once.
+
+        :param keys: The function accept multiple keys as positional arguments
+        :param noreply: instructs the server not reply
+        :returns: Whether all given keys have been deleted
+        :rtype: boolen
+        """
+        return all(self.delete(key) for key in keys)
+
+    def clear(self):
+        """Clears the cache. Not all caches support completely clearing the cache
+
+        :returns: Whether the cache been cleared.
+        :rtype: boolean
+        """
+        return True
+
+    def incr(self, key, delta=1, noreply=False):
+        """Increments the value of a key by `delta`. If the key does not yet exists it is initialized with `delta`
+
+        For supporting caches this is an atomic operation
+
+        :param key: the key to increment
+        :param delta: the delta to add
+        :param noreply: instructs the server not reply
+        :returns: The new value or ``None`` for backend errors.
+        """
+        value = (self.get(key) or 0) + delta
+        return value if self.set(key, value) else None
+
+    def decr(self, key, delta=1, noreply=False):
+        """Decrements the value of a key by `delta`. If the key does not yet exists it is initialized with `-delta`.
+
+        For supporting caches this is an atomic operation.
+
+        :param key: the key to increment
+        :param delta: the delta to subtruct
+        :param noreply: instructs the server not reply
+        :returns: The new value or `None` for backend errors.
+        """
+        value = (self.get(key) or 0) - delta
+        return value if self.set(key, value) else None

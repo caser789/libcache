@@ -13,13 +13,9 @@ class CacheBase(object):
         self._client = None
         self.timeout = timeout or default_timeout
 
-    @property
-    def raw_client(self):
-        """Get raw cache server client.
-
-        :returns: underlying cache client object.
-        """
-        return self._client
+    ########################################
+    # String
+    ########################################
 
     def get(self, key):
         """Look up the `key` in cache and return the value of it.
@@ -121,14 +117,6 @@ class CacheBase(object):
         """
         return all(self.delete(key) for key in keys)
 
-    def clear(self):
-        """Clears the cache. Not all caches support completely clearing the cache
-
-        :returns: Whether the cache been cleared.
-        :rtype: boolean
-        """
-        return True
-
     def incr(self, key, delta=1, noreply=False):
         """Increments the value of a key by `delta`. If the key does not yet exists it is initialized with `delta`
 
@@ -154,3 +142,59 @@ class CacheBase(object):
         """
         value = (self.get(key) or 0) - delta
         return value if self.set(key, value) else None
+
+    ########################################
+    # List
+    ########################################
+	def blpop(self, key, timeout=0):
+		"""Blocking pop a value from the head of the list.
+
+		:param key: the key of list
+		:param timeout: blocking timeout, 0 means block indefinitely
+		:returns: The popped value or None if timeout.
+		"""
+		raise NotImplementedError()
+
+	def brpop(self, key, timeout=0):
+		"""Blocking pop a value from the tail of the list.
+
+		:param key: the key of list
+		:param timeout: blocking timeout, 0 means block indefinitely
+		:returns: The popped value or None if timeout.
+		"""
+		raise NotImplementedError()
+
+    ########################################
+    # Hash
+    ########################################
+
+    ########################################
+    # Set
+    ########################################
+
+    ########################################
+    # Zset
+    ########################################
+
+    ########################################
+    # Other
+    ########################################
+
+    def clear(self):
+        """Clears the cache. Not all caches support completely clearing the cache
+
+        :returns: Whether the cache been cleared.
+        :rtype: boolean
+        """
+        return True
+
+    @property
+    def raw_client(self):
+        """Get raw cache server client.
+
+        :returns: underlying cache client object.
+        """
+        return self._client
+
+
+

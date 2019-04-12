@@ -65,3 +65,48 @@ class CacheBase(object):
         :param keys: The function accepts multiple keys as positional arguments
         """
         return dict([(k, self.get(k)) for k in keys])
+
+    def set(self, key, value, timeout=None, noreply=False):
+        """Add a new key/value to the cache (overwrite value, if key exists)
+
+        :param key: the key to set
+        :param value: the value of the key
+        :param timeout: the cache timeout for the key.
+                            If not specificed, use the default timeout.
+                            If specified 0, key will never expire
+        :param noreply: instructs the server to not reply
+        :returns: Whether the key existed and has been set
+        :rtype: boolean
+        TODO: __set__
+        """
+        return True
+
+    def set_or_overwrite(self, key, value, timeout=None, noreply=False):
+        """Works like :meth:`set` but does not overwrite the existing value
+
+        :param key: the key to set
+        :param value: the value of the key
+        :param timeout: the cache timeout for the key.
+                            If not specificed, use the default timeout.
+                            If specified 0, key will never expire
+        :param noreply: instructs the server to not reply
+        :returns: Whether the key existed and has been set
+        :rtype: boolean
+        """
+        return True
+
+    def set_many(self, timeout=None, noreply=False, **kw):
+        """Sets multiple key-value pair
+
+        :param timeout: the cache timeout for the key.
+                            If not specificed, use the default timeout.
+                            If specified 0, key will never expire
+        :param noreply: instructs the server to not reply
+        :returns: Whether all key-value pairs have been set
+        :rtype: boolean
+        """
+        res = True
+        for k, v in kw.items():
+            if not self.set(k, v, timeout):
+                res = False
+        return res

@@ -41,9 +41,9 @@ class CacheBase(object):
 
     def get_values(self, *keys):
         """Get valeus by keys
-        
+
         foo, bar = cache.get_values('foo', 'bar')
-        
+
         Share same error handling with :meth:`get`
         :param keys: the function acception multiple keys as positional arguments
         """
@@ -145,8 +145,18 @@ class CacheBase(object):
 
     ########################################
     # List
+    # 
+    # block_left_pop
+    # block_right_pop
+    # lindex
+    # llen
+    # lpop
+    # lpush
+    # lrange
+    # ltrim
+    # rpop
     ########################################
-	def blpop(self, key, timeout=0):
+	def block_left_pop(self, key, timeout=0):
 		"""Blocking pop a value from the head of the list.
 
 		:param key: the key of list
@@ -155,7 +165,7 @@ class CacheBase(object):
 		"""
 		raise NotImplementedError()
 
-	def brpop(self, key, timeout=0):
+	def block_right_pop(self, key, timeout=0):
 		"""Blocking pop a value from the tail of the list.
 
 		:param key: the key of list
@@ -163,6 +173,83 @@ class CacheBase(object):
 		:returns: The popped value or None if timeout.
 		"""
 		raise NotImplementedError()
+
+        def lindex(self, key, index):
+            """Return the item from list at position `index`
+
+            :param key: the key of list
+            :param index: the position, can be negative
+            :returns: The value at position `index` or None of index is out of range
+            """
+            raise NotImplementedError()
+
+        def llen(self, key):
+            """Return the number of elements in list
+
+            :param key: the key of list
+            :returns: number of elements in list
+            :rtype: int
+            """
+            raise NotImplementedError()
+
+        def lpop(self, key):
+            """Pop a value from the head of list
+
+            :param key: the key of list
+            :returns: The popped value or None if list is empty
+            """
+            raise NotImplementedError()
+
+        def lpush(self, key, value):
+            """Push a value to the head of the list
+
+            :param key: the key of list
+            :param value: the value to be pushed
+            :returns: Whether the value has been added to list
+            :rtype: boolean
+            """
+            raise NotImplementedError()
+
+        def lrange(self, key, start=0, end=-1):
+            """Return a slice of the list
+
+            :param key: the key of list
+            :param start: the start position, can be negative
+            :param end: the end position, can be negative
+            :returns: The values between `start` and `end`
+            :rtype: list
+            """
+            raise NotImplementedError()
+
+        def ltrim(self, key, start, end):
+            """Trim the list, removing all values not within the slice
+
+            :param key: the key of list
+            :param start: the start postion, can be negative
+            :param end: the end postion, can be negative
+            :returns: whether the list has been trimmed
+            :rtype: boolean
+            """
+            raise NotImplementedError()
+
+        def rpop(self, key):
+            """Pop a value from the tail of list
+
+            :param key: the key of list
+            :returns: the popped value or None if list is empty
+            """
+            raise NotImplementedError()
+
+        def rpush(self, key, value):
+            """Push a value to the tail of the list
+
+            :param key: the key of list
+            :param value: the value to be pushed
+            :returns: whether the value has been added to list
+            :rtype: boolean
+            """
+            raise NotImplementedError()
+
 
     ########################################
     # Hash
@@ -195,6 +282,3 @@ class CacheBase(object):
         :returns: underlying cache client object.
         """
         return self._client
-
-
-

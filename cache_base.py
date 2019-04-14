@@ -253,7 +253,79 @@ class CacheBase(object):
 
     ########################################
     # Hash
+    # 
+    # hgetall
+    # hget
+    # hset
+    # hdel
+    # hexists
+    # hlen
     ########################################
+
+    def hgetall(self, key):
+        """Look up hash in the cache and return all fields and values for it
+
+        :param key: the key of hash to be looked up
+        :returns: The dict value of hash, if empty, return {}
+        :rtype: dict
+        """
+        raise NotImplementedError()
+
+    def hget(self, key, field):
+        """Look up field in the hash and return the value of it.
+
+        :param key: the key of hash to be lookup
+        :param field: the field in the hash to be lookup
+        :returns: the value if exists else ``None``
+        """
+        raise NotImplementedError()
+
+    def hset(self, key, field, value, timeout=None, noreply=False):
+        """Add a new field/value to the hash in cache (overwrite value if exists)
+
+        :param key: the key of hash to set
+        :param field: the field in the hash to set
+        :param value: the value for the field
+        :param timeout: the cache timeout for the field. 
+                                        If not specified, it used the default timeout
+                                        If specified 0, never expire
+                                        
+        :param noreply: instructs the server to not send the reply
+        :returns: whether the key existed and has been set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def hdel(self, key, field, noreply=False):
+        """Delete field of hash from the cache
+
+        :param key: the key of hash to delete
+        :param field: the field in the hash to delete
+        :param noreply: instructs the server not reply
+        :returns: whether the key has been deleted
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def hexists(self, key, field):
+        """Check whether `field` is an existing field in the hash
+
+        :param key: the key of hash
+        :param field: the field to be checked
+        :returns: whether `field` is an existing field in the hash
+        :rtype: boolean
+        """
+        return self.hget(key, field) is not None
+
+    def hlen(self, key):
+        """Get number of fields contained in the hash
+
+        :param key: the key of hash
+        :returns: the number of fields contained in the hash
+        :rtype: int
+        """
+        return len(self.hgetall(key))
+
 
     ########################################
     # Set
@@ -282,3 +354,13 @@ class CacheBase(object):
         :returns: underlying cache client object.
         """
         return self._client
+
+    def expire(self, key, timeout):
+        """Set a timeout on key. After the timeout has expired, the key will automatically be deleted.
+
+        :param key: key to set timeout
+        :param timeout: timeout value in seconds
+        :returns: True if timeout was set, False if key does not exist or timeout could not be set
+        :rtype: boolean
+        """
+        raise NotImplementedError()

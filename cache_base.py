@@ -331,6 +331,73 @@ class CacheBase(object):
     # Set
     ########################################
 
+    def sadd(self, key, value):
+        """Add a value to the set
+
+        :param key: the key of set to add
+        :param value: the value to be added
+        :returns: whether the value has been added to set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def sadd_many(self, key, *values):
+        """Add multiple values to the set
+
+        :param key: the key of set to add
+        :param values: the values to be added
+        :returns: whether the values has been added to set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def scard(self, key):
+        """Return the number of elements in set
+
+        :param key: the key of set
+        :returns: number of elements in set
+        :rtype: int
+        """
+        raise NotImplementedError()
+
+    def sismember(self, key, value):
+        """Return whether the value is a member of set
+
+        :param key: the key of set
+        :param value: the value to be checked
+        :returns: whether the `value` is a member of a set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def smembers(self, key):
+        """Return all the members of set
+
+        :param key: the key of set
+        :returns: all the members value of set
+        :rtype: set
+        """
+        raise NotImplementedError()
+
+    def srandmember(self, key):
+        """Randomly return a member of set
+
+        :param key: the key of set
+        :returns: random member or None if empty
+        """
+        raise NotImplementedError()
+
+    def srem(self, key, value):
+        """Remove value from set
+
+        :param key: the key of set
+        :param value: the value to be removed
+        :returns: whether the `value` has been removed from set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+
     ########################################
     # Zset
     ########################################

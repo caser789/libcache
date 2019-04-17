@@ -289,7 +289,7 @@ class CacheBase(object):
         :param timeout: the cache timeout for the field. 
                                         If not specified, it used the default timeout
                                         If specified 0, never expire
-                                        
+
         :param noreply: instructs the server to not send the reply
         :returns: whether the key existed and has been set
         :rtype: boolean
@@ -401,6 +401,141 @@ class CacheBase(object):
     ########################################
     # Zset
     ########################################
+
+    def zadd(self, key, value, score):
+        """Add value to sorted set.
+
+        :param key: the key of sorted set
+        :param value: the value to be added
+        :param score: the score of the value
+        :returns: Whether the value has been set
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def zcard(self, key):
+        """Return the number of values in sorted set
+
+        :param key: the key of sorted set
+        :returns: the number of values in sorted set
+        :rtype: int
+        """
+        raise NotImplementedError()
+
+    def zcount(self, key, min, max):
+        """Returns the number of values in the sorted set `key` with a score between `min` and `max`
+
+        :param key: the key of sorted set
+        :param min: min score
+        :param max: max score
+        :returns: the number of values
+        :rtype: int
+        """
+        raise NotImplementedError()
+
+    def zincrby(self, key, value, delta=1):
+        """Increment the score of `value` in sorted set `key` by `delta`
+
+        :param key: the key of sorted set
+        :param value: the value to be incremented
+        :param delta: increment amount
+        :returns: the new score
+        :rtype: int
+        """
+        raise NotImplementedError()
+    
+    def zrange(self, key, start=0, end=-1, reverse=False, withscores=False):
+        """Return a range of values from sorted set `key` between `start` and `end`
+
+        :param key: the key of sorted set
+        :param start: start index
+        :param end: end index
+        :param reverse: sorted in descending order
+        :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
+        :rtype: list
+        """
+        raise NotImplementedError()
+
+    def zrangebyscore(self, key, min, max, start=None, num=None, reverse=False, withscores=False):
+        """Return a range of values from sorted set `key` with scores between `min` and `max`
+
+        :param key: the key of sorted set
+        :param min: min score
+        :param max: max score
+        :param start: start offset
+        :param num: limit count
+        :param reverse: sorted in descending order
+        :param withscores: return the scores along with the values
+        :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
+        :rtype: list
+        """
+        raise NotImplementedError()
+
+    def zrank(self, key, value, reverse=False):
+        """Return the rank of `value` in sorted set
+
+        :param key: the key of sorted set
+        :param value: the value to be checked
+        :param reverse: sorted in descending order
+        :returns: the rank of `value` in sorted set `key` or None if not existed
+        :rtype: int
+        """
+        raise NotImplementedError()
+
+    def zrem(self, key, value):
+        """Remove the `value` in sorted set
+        
+        :param key: the key of sorted set
+        :param value: the value to be removed
+        :returns: whether the `value` has been removed
+        :rtype: boolean
+        """
+        raise NotImplementedError()
+
+    def zremrangebyrank(self, key, start, end, reverse=False):
+        """Remove the values in sorted set with scores between `start` and `end`
+
+        :param key: the key of sorted set
+        :param start: start index
+        :param end: end index
+        :param reverse: sorted in descending order
+        :returns: the number of values removed
+        :rtype: int
+        """
+        raise NotImplementedError()
+
+    def zremrangebyscore(self, key, min, max):
+        """Remove the values in sorted set with scores between `min` and `max`
+
+        :param key: the key of sorted set
+        :param min: min score
+        :param max: max score
+        :returns: the number of values removed
+        :rtype: int
+        """
+        raise NotImplementedError()
+    
+    def zscore(self, key, value):
+        """Return the score of `value` in sorted set
+
+        :param key: the key of sorted set
+        :param value: the value to be checked
+        :returns: the score of `value` in sorted set `key` or None if not existed
+        :rtype: float
+        """
+        raise NotImplementedError()
+
+    def zunionstore(self, dest, keys, aggregate=None):
+        """Union multiple sorted sets into a new sorted set
+
+        :param dest: destination sorted set
+        :param keys: keys of sorted sets to be aggregated
+        :param aggregate: specify how the results of the union are aggregated, defaults to SUM
+        :returns: the number of elements in the resulting sorted set at destination
+        :rtype: int
+        """
+        raise NotImplementedError()
+
 
     ########################################
     # Other

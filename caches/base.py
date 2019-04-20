@@ -3,7 +3,7 @@
 default_timeout = 1
 
 
-class CacheBase(object):
+class Base(object):
     """Base class for the cache system. All the caches implement this API or a superset of it.
 
     :param config: the config object
@@ -77,7 +77,7 @@ class CacheBase(object):
         """
         return True
 
-    def set_or_overwrite(self, key, value, timeout=None, noreply=False):
+    def set_not_overwrite(self, key, value, timeout=None, noreply=False):
         """Works like :meth:`set` but does not overwrite the existing value
 
         :param key: the key to set
@@ -145,7 +145,7 @@ class CacheBase(object):
 
     ########################################
     # List
-    # 
+    #
     # block_left_pop
     # block_right_pop
     # lindex
@@ -253,7 +253,7 @@ class CacheBase(object):
 
     ########################################
     # Hash
-    # 
+    #
     # hgetall
     # hget
     # hset
@@ -286,7 +286,7 @@ class CacheBase(object):
         :param key: the key of hash to set
         :param field: the field in the hash to set
         :param value: the value for the field
-        :param timeout: the cache timeout for the field. 
+        :param timeout: the cache timeout for the field.
                                         If not specified, it used the default timeout
                                         If specified 0, never expire
 
@@ -443,7 +443,7 @@ class CacheBase(object):
         :rtype: int
         """
         raise NotImplementedError()
-    
+
     def zrange(self, key, start=0, end=-1, reverse=False, withscores=False):
         """Return a range of values from sorted set `key` between `start` and `end`
 
@@ -484,7 +484,7 @@ class CacheBase(object):
 
     def zrem(self, key, value):
         """Remove the `value` in sorted set
-        
+
         :param key: the key of sorted set
         :param value: the value to be removed
         :returns: whether the `value` has been removed
@@ -514,7 +514,7 @@ class CacheBase(object):
         :rtype: int
         """
         raise NotImplementedError()
-    
+
     def zscore(self, key, value):
         """Return the score of `value` in sorted set
 

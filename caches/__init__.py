@@ -28,3 +28,6 @@ else:
 
 
 _numeric_types = six.integer_types + (float,)
+
+_DEFAULT_SOCKET_TIMEOUT = 3
+_DEFAULT_TIMEOUT = 60

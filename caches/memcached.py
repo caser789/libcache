@@ -3,9 +3,9 @@ import binascii
 
 from . import _to_native
 from . import _to_binary
+from . import _DEFAULT_SOCKET_TIMEOUT
 from .base import Base
 
-_DEFAULT_SOCKET_TIMEOUT = 3
 _PYLIBMC_BEHAVIORS = {
     'connect_timeout': _DEFAULT_SOCKET_TIMEOUT * 1000,
     'send_timeout': _DEFAULT_SOCKET_TIMEOUT * 1000 * 1000,

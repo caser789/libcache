@@ -1,6 +1,6 @@
 """ Base class for cache system
 """
-default_timeout = 1
+from . import _DEFAULT_TIMEOUT
 
 
 class Base(object):
@@ -11,7 +11,7 @@ class Base(object):
 
     def __init__(self, timeout=None):
         self._client = None
-        self.timeout = timeout or default_timeout
+        self.timeout = timeout or _DEFAULT_TIMEOUT
 
     ########################################
     # String

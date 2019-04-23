@@ -1,21 +1,93 @@
-""" Base class for cache system
-"""
+import pickle
+import platform
+
+import six
+
+if platform.system().lower() == 'linux':
+    import socket
+    _TCP_KEEP_ALIVE_OPTIONS = {
+        socket.TCP_KEEPIDLE: 30,
+        socket.TCP_KEEPINTVL: 5,
+        socket.TCP_KEEPCNT: 5,
+    }
+else:
+    _TCP_KEEP_ALIVE_OPTIONS = {}
+
+from .base import Base
+from . import _to_native
+from . import _DEFAULT_SOCKET_TIMEOUT
 from . import _DEFAULT_TIMEOUT
 
 
-class Base(object):
-    """Base class for the cache system. All the caches implement this API or a superset of it.
+class Redis(Base):
+    """Uses the Redis key-value store as a cache backend
 
-    :param config: the config object
+    :param host: address of Redis server
+    :param port: port number of Redis server
+    :param unix_socket_path: unix socket file path
+    :param password: password authentication for the Redis server
+    :param db: db (zero-based numeric index) on Redis server to connect
+    :param timeout: default timeout
+    :param prefix: A prefix added to all keys
+
+    Any additional keyword arguments will be passwed to ``redis.Redis``
     """
 
-    def __init__(self, timeout=None):
-        self._client = None
-        self.timeout = timeout or _DEFAULT_TIMEOUT
+    def __init__(self, host, port, unix_socket_path=None, password=None, db=0, timeout=None, prefix='', default_scan_count=1000, **kw):
+        Base.__init__(timeout)
+        self.prefix = prefix
+        self._default_scan_count = default_scan_count
+        try:
+            import redis
+        except ImportError:
+            raise RuntimeError('no redis module found')
+        kwargs = dict(
+            host=host,
+            port=port,
+            unix_socket_path=unix_socket_path,
+            password=password,
+            db=db,
+        )
+        if 'socket_timeout' not in kwargs:
+            kwargs['socket_timeout'] = _DEFAULT_SOCKET_TIMEOUT
+        if 'socket_connect_timeout' not in kwargs:
+            kwargs['socket_connect_timeout'] = _DEFAULT_SOCKET_TIMEOUT
+        if 'socket_keepalive' not in kwargs:
+            kwargs['socket_keepalive'] = 1
+        if 'socket_keepalive_options' not in kwargs:
+            kwargs['socket_keepalive_options'] = _TCP_KEEP_ALIVE_OPTIONS
 
-    ########################################
-    # String
-    ########################################
+        self._client = redis.Redis(**kwargs)
+
+    def _normalize_key(self, key):
+        key = _to_native(key, 'utf-8')
+        if self.prefix:
+            key = self.prefix + key
+        return key
+
+    def dumps(self, value):
+        """Dumps an object into a string for redis. By default it serialized
+        integers as regular string and pickle dumps everyting else.
+        """
+        if type(value) in six.integer_types:  # pylint: disable=unidiomatic-typecheck
+            return str(value).encode('ascii')
+        return b'!' + pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+
+    def loads(self, value):
+        """The reversal of :meth:`dumps`. This might be called with None
+        """
+        if value is None:
+            return None
+
+        if value.startswith(b'!'):
+            try:
+                return pickle.loads(value[1:])
+            except pickle.PickleError:
+                return None
+        try:
+            return int(value)
+        except ValueError:
+            return value
 
     def get(self, key):
         """Look up the `key` in cache and return the value of it.
@@ -25,19 +97,7 @@ class Base(object):
 
         TODO: support __get__
         """
-        return None
-
-    def delete(self, key, noreply=False):
-        """Delete `key` from cache.
-
-        :param key: the `key` to delete.
-        :param noreply: instruct the server to not reply.
-        :returns: whether the key been deleted.
-        :rtype: boolean
-
-        TODO: __del__
-        """
-        return True
+        return self.loads(self._client.get(self._normalize_key(key)))
 
     def get_values(self, *keys):
         """Get valeus by keys
@@ -47,8 +107,8 @@ class Base(object):
         Share same error handling with :meth:`get`
         :param keys: the function acception multiple keys as positional arguments
         """
-        key_to_value = self.get_key_to_value(*keys)
-        return [key_to_value.get(k) for k in keys]
+        keys = [self._normalize_key(key) for key in keys]
+        return [self.loads(x) for x in self._client.mget(keys)]
 
     def get_key_to_value(self, *keys):
         """Like :meth:`get_values` but return a dict::
@@ -60,7 +120,14 @@ class Base(object):
 
         :param keys: The function accepts multiple keys as positional arguments
         """
-        return dict([(k, self.get(k)) for k in keys])
+        query_keys = [self._normalize_key(key) for key in keys]
+        values = self._client.mget(query_keys)
+        res = {}
+        for i in range(len(keys)):
+            value = values[i]
+            if value is not None:
+                res[keys[i]] = self.loads(value)
+        return res
 
     def set(self, key, value, timeout=None, noreply=False):
         """Add a new key/value to the cache (overwrite value, if key exists)
@@ -75,7 +142,13 @@ class Base(object):
         :rtype: boolean
         TODO: __set__
         """
-        return True
+        if timeout is None:
+            timeout = self.default_timeout
+        value = self.dumps(value)
+        key = self._normalize_key(key)
+        if timeout == 0:
+            return self._client.set(name=key, value=value)
+        return self._client.setex(name=key, value=value, time=timeout)
 
     def set_not_overwrite(self, key, value, timeout=None, noreply=False):
         """Works like :meth:`set` but does not overwrite the existing value
@@ -89,7 +162,15 @@ class Base(object):
         :returns: Whether the key existed and has been set
         :rtype: boolean
         """
-        return True
+        if timeout is None:
+            timeout = self.default_timeout
+        if timeout == 0:
+            timeout = None
+        key = self._normalize_key(key)
+        value = self.dumps(value)
+        # This requires the version of redis server >= 2.6.12, please refer
+        # https://github.com/andymccurdy/redis-py/issues/387 for more details.
+        return self._client.set(key, value, nx=True, ex=timeout)
 
     def set_many(self, timeout=None, noreply=False, **kw):
         """Sets multiple key-value pair
@@ -101,11 +182,30 @@ class Base(object):
         :returns: Whether all key-value pairs have been set
         :rtype: boolean
         """
-        res = True
-        for k, v in kw.items():
-            if not self.set(k, v, timeout):
-                res = False
-        return res
+        if timeout is None:
+            timeout = self.timeout
+        pipe = self._client.pipeline()
+        for key, value in kw.items():
+            value = self.dumps(value)
+            key = self._normalize_key(key)
+            if timeout == 0:
+                pipe.set(name=key, value=value)
+            else:
+                pipe.setex(name=key, value=value, time=timeout)
+        return pipe.execute()
+
+    def delete(self, key, noreply=False):
+        """Delete `key` from cache.
+
+        :param key: the `key` to delete.
+        :param noreply: instruct the server to not reply.
+        :returns: whether the key been deleted.
+        :rtype: boolean
+
+        TODO: __del__
+        """
+        self._client.delete(self._normalize_key(key))
+        return True
 
     def delete_many(self, noreply=False, *keys):
         """Delete multiple keys at once.
@@ -115,7 +215,36 @@ class Base(object):
         :returns: Whether all given keys have been deleted
         :rtype: boolen
         """
-        return all(self.delete(key) for key in keys)
+        if not keys:
+            return True
+        keys = [self._normalize_key(key) for key in keys]
+        self._client.delete(*keys)
+        return True
+
+    def clear(self):
+        """Clears the cache. Not all caches support completely clearing the cache
+
+        :returns: Whether the cache been cleared.
+        :rtype: boolean
+        """
+        from redis.exceptions import ResponseError
+        status = False
+        client = self._client
+        if self.prefix:
+            pattern = self.prefix + '*'
+            try:
+                cursor = '0'
+                while cursor != 0:
+                    cursor, keys = client.scan(cursor=cursor, match=pattern, count=self._default_scan_count)
+                    if keys:
+                        status = client.delete(*keys)
+            except ResponseError:
+                keys = client.keys(pattern)
+                if keys:
+                    status = client.delete(*keys)
+        else:
+            status = client.flushdb()
+        return status
 
     def incr(self, key, delta=1, noreply=False):
         """Increments the value of a key by `delta`. If the key does not yet exists it is initialized with `delta`
@@ -127,8 +256,7 @@ class Base(object):
         :param noreply: instructs the server not reply
         :returns: The new value or ``None`` for backend errors.
         """
-        value = (self.get(key) or 0) + delta
-        return value if self.set(key, value) else None
+        return self._client.incr(name=self._normalize_key(key), amount=delta)
 
     def decr(self, key, delta=1, noreply=False):
         """Decrements the value of a key by `delta`. If the key does not yet exists it is initialized with `-delta`.
@@ -140,40 +268,35 @@ class Base(object):
         :param noreply: instructs the server not reply
         :returns: The new value or `None` for backend errors.
         """
-        value = (self.get(key) or 0) - delta
-        return value if self.set(key, value) else None
-
-    ########################################
-    # List
-    #
-    # block_left_pop
-    # block_right_pop
-    # lindex
-    # llen
-    # lpop
-    # lpush
-    # lrange
-    # ltrim
-    # rpop
-    ########################################
+        return self._client.decr(name=self._normalize_key(key), amount=delta)
 
     def block_left_pop(self, key, timeout=0):
         """Blocking pop a value from the head of the list.
 
+        TODO: why loads res[1], is it res[1:] ?
+
         :param key: the key of list
         :param timeout: blocking timeout, 0 means block indefinitely
         :returns: The popped value or None if timeout.
         """
-        raise NotImplementedError()
+        res = self._client.blpop([self._normalize_key(key)], timeout)
+        if res is not None:
+            res = self.loads(res[1])
+        return res
 
     def block_right_pop(self, key, timeout=0):
         """Blocking pop a value from the tail of the list.
 
+        TODO: ?
+
         :param key: the key of list
         :param timeout: blocking timeout, 0 means block indefinitely
         :returns: The popped value or None if timeout.
         """
-        raise NotImplementedError()
+        res = self._client.brpop([self._normalize_key(key)], timeout)
+        if res is not None:
+            res = self.loads(res[1])
+        return res
 
     def lindex(self, key, index):
         """Return the item from list at position `index`
@@ -182,7 +305,7 @@ class Base(object):
         :param index: the position, can be negative
         :returns: The value at position `index` or None of index is out of range
         """
-        raise NotImplementedError()
+        return self.loads(self._client.lindex(self._normalize_key(key), index))
 
     def llen(self, key):
         """Return the number of elements in list
@@ -191,7 +314,7 @@ class Base(object):
         :returns: number of elements in list
         :rtype: int
         """
-        raise NotImplementedError()
+        return self._client.llen(self._normalize_key(key))
 
     def lpop(self, key):
         """Pop a value from the head of list
@@ -199,7 +322,7 @@ class Base(object):
         :param key: the key of list
         :returns: The popped value or None if list is empty
         """
-        raise NotImplementedError()
+        return self.loads(self._client.lpop(self._normalize_key(key)))
 
     def lpush(self, key, value):
         """Push a value to the head of the list
@@ -209,7 +332,7 @@ class Base(object):
         :returns: Whether the value has been added to list
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.lpush(self._normalize_key(key), self.dumps(value))
 
     def lrange(self, key, start=0, end=-1):
         """Return a slice of the list
@@ -220,7 +343,7 @@ class Base(object):
         :returns: The values between `start` and `end`
         :rtype: list
         """
-        raise NotImplementedError()
+        return [self.loads(v) for v in self._client.lrange(self._normalize_key(key), start, end)]
 
     def ltrim(self, key, start, end):
         """Trim the list, removing all values not within the slice
@@ -231,7 +354,7 @@ class Base(object):
         :returns: whether the list has been trimmed
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.ltrim(self._normalize_key(key), start, end)
 
     def rpop(self, key):
         """Pop a value from the tail of list
@@ -239,7 +362,7 @@ class Base(object):
         :param key: the key of list
         :returns: the popped value or None if list is empty
         """
-        raise NotImplementedError()
+        return self.loads(self._client.rpop(self._normalize_key(key)))
 
     def rpush(self, key, value):
         """Push a value to the tail of the list
@@ -249,7 +372,76 @@ class Base(object):
         :returns: whether the value has been added to list
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.rpush(self._normalize_key(key), self.dumps(value))
+
+    def sadd(self, key, value):
+        """Add a value to the set
+
+        :param key: the key of set to add
+        :param value: the value to be added
+        :returns: whether the value has been added to set
+        :rtype: boolean
+        """
+        return self._client.sadd(self._normalize_key(key), self.dumps(value)) >= 0
+
+    def sadd_many(self, key, *values):
+        """Add multiple values to the set
+
+        :param key: the key of set to add
+        :param values: the values to be added
+        :returns: whether the values has been added to set
+        :rtype: boolean
+        """
+        return self._client.sadd(self._normalize_key(key), *[self.dumps(val) for val in values]) >= 0
+
+    def scard(self, key):
+        """Return the number of elements in set
+
+        :param key: the key of set
+        :returns: number of elements in set
+        :rtype: int
+        """
+        return self._client.scard(self._normalize_key(key))
+
+    def sismember(self, key, value):
+        """Return whether the value is a member of set
+
+        :param key: the key of set
+        :param value: the value to be checked
+        :returns: whether the `value` is a member of a set
+        :rtype: boolean
+        """
+        return self._client.sismember(self._normalize_key(key), self.dumps(value))
+
+    def smembers(self, key):
+        """Return all the members of set
+
+        :param key: the key of set
+        :returns: all the members value of set
+        :rtype: set
+        """
+        values = self._client.smembers(self._normalize_key(key))
+        if values:
+            values = set([self.loads(v) for v in value])
+        return values
+
+    def srandmember(self, key):
+        """Randomly return a member of set
+
+        :param key: the key of set
+        :returns: random member or None if empty
+        """
+        return self.loads(self._client.srandmember(self._normalize_key(key)))
+
+    def srem(self, key, value):
+        """Remove value from set
+
+        :param key: the key of set
+        :param value: the value to be removed
+        :returns: whether the `value` has been removed from set
+        :rtype: boolean
+        """
+        return self._client.srem(self._normalize_key(key), self.dumps(value)) >= 0
 
 
     ########################################
@@ -270,7 +462,11 @@ class Base(object):
         :returns: The dict value of hash, if empty, return {}
         :rtype: dict
         """
-        raise NotImplementedError()
+        kv= = self._client.hgetall(self._normalize_key(key))
+        if kv is not None:
+            for k, v in kv.items():
+                kv[k] = self.loads(v)
+        return kv
 
     def hget(self, key, field):
         """Look up field in the hash and return the value of it.
@@ -279,7 +475,7 @@ class Base(object):
         :param field: the field in the hash to be lookup
         :returns: the value if exists else ``None``
         """
-        raise NotImplementedError()
+        return self.loads(self._client.hget(self._normalize_key(key), field))
 
     def hset(self, key, field, value, timeout=None, noreply=False):
         """Add a new field/value to the hash in cache (overwrite value if exists)
@@ -295,7 +491,8 @@ class Base(object):
         :returns: whether the key existed and has been set
         :rtype: boolean
         """
-        raise NotImplementedError()
+        self._client.hset(self._normalize_key(key), field, self.dumps(value))
+        return True
 
     def hdel(self, key, field, noreply=False):
         """Delete field of hash from the cache
@@ -306,7 +503,8 @@ class Base(object):
         :returns: whether the key has been deleted
         :rtype: boolean
         """
-        raise NotImplementedError()
+        self._client.hdel(self._normalize_key(key), field)
+        return True
 
     def hexists(self, key, field):
         """Check whether `field` is an existing field in the hash
@@ -316,7 +514,7 @@ class Base(object):
         :returns: whether `field` is an existing field in the hash
         :rtype: boolean
         """
-        return self.hget(key, field) is not None
+        return self._client.hexists(self._normalize_key(key), field)
 
     def hlen(self, key):
         """Get number of fields contained in the hash
@@ -325,79 +523,7 @@ class Base(object):
         :returns: the number of fields contained in the hash
         :rtype: int
         """
-        return len(self.hgetall(key))
-
-
-    ########################################
-    # Set
-    ########################################
-
-    def sadd(self, key, value):
-        """Add a value to the set
-
-        :param key: the key of set to add
-        :param value: the value to be added
-        :returns: whether the value has been added to set
-        :rtype: boolean
-        """
-        raise NotImplementedError()
-
-    def sadd_many(self, key, *values):
-        """Add multiple values to the set
-
-        :param key: the key of set to add
-        :param values: the values to be added
-        :returns: whether the values has been added to set
-        :rtype: boolean
-        """
-        raise NotImplementedError()
-
-    def scard(self, key):
-        """Return the number of elements in set
-
-        :param key: the key of set
-        :returns: number of elements in set
-        :rtype: int
-        """
-        raise NotImplementedError()
-
-    def sismember(self, key, value):
-        """Return whether the value is a member of set
-
-        :param key: the key of set
-        :param value: the value to be checked
-        :returns: whether the `value` is a member of a set
-        :rtype: boolean
-        """
-        raise NotImplementedError()
-
-    def smembers(self, key):
-        """Return all the members of set
-
-        :param key: the key of set
-        :returns: all the members value of set
-        :rtype: set
-        """
-        raise NotImplementedError()
-
-    def srandmember(self, key):
-        """Randomly return a member of set
-
-        :param key: the key of set
-        :returns: random member or None if empty
-        """
-        raise NotImplementedError()
-
-    def srem(self, key, value):
-        """Remove value from set
-
-        :param key: the key of set
-        :param value: the value to be removed
-        :returns: whether the `value` has been removed from set
-        :rtype: boolean
-        """
-        raise NotImplementedError()
-
+        return self._client.hlen(self._normalize_key(key))
 
     ########################################
     # Zset
@@ -425,7 +551,7 @@ class Base(object):
         :returns: Whether the value has been set
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.zadd(self._normalize_key(key), self.dumps(value), score) >= 0
 
     def zcard(self, key):
         """Return the number of values in sorted set
@@ -434,7 +560,7 @@ class Base(object):
         :returns: the number of values in sorted set
         :rtype: int
         """
-        raise NotImplementedError()
+        return self._client.zcard(self._normalize_key(key))
 
     def zcount(self, key, min, max):
         """Returns the number of values in the sorted set `key` with a score between `min` and `max`
@@ -445,7 +571,7 @@ class Base(object):
         :returns: the number of values
         :rtype: int
         """
-        raise NotImplementedError()
+        return self._client.zcount(self._normalize_key(key), min, max)
 
     def zincrby(self, key, value, delta=1):
         """Increment the score of `value` in sorted set `key` by `delta`
@@ -456,7 +582,7 @@ class Base(object):
         :returns: the new score
         :rtype: int
         """
-        raise NotImplementedError()
+        return self._client.zincrby(self._normalize_key(key), self.dumps(value), delta)
 
     def zrange(self, key, start=0, end=-1, reverse=False, withscores=False):
         """Return a range of values from sorted set `key` between `start` and `end`
@@ -468,7 +594,12 @@ class Base(object):
         :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
         :rtype: list
         """
-        raise NotImplementedError()
+        values = self._client.zrange(self._normalize_key(key), start, end, reverse, withscores)
+        if withscores:
+            values = [(self.loads(v), s) for v, s in values]
+        else:
+            values = [self.loads(v) for v in values]
+        return values
 
     def zrangebyscore(self, key, min, max, start=None, num=None, reverse=False, withscores=False):
         """Return a range of values from sorted set `key` with scores between `min` and `max`
@@ -483,7 +614,17 @@ class Base(object):
         :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
         :rtype: list
         """
-        raise NotImplementedError()
+        client = self._client
+        key = self._normalize_key(key)
+        if reverse:
+            values = client.zrevrangebyscore(key, max, min, start, num, withscores)
+        else:
+            values = client.zrangebyscore(key, min, max, start, num, withscores)
+        if withscores:
+            values = [(self.loads(v), s) for v, s in values]
+        else:
+            values = [self.loads(v) for v in values]
+        return values
 
     def zrank(self, key, value, reverse=False):
         """Return the rank of `value` in sorted set
@@ -494,7 +635,12 @@ class Base(object):
         :returns: the rank of `value` in sorted set `key` or None if not existed
         :rtype: int
         """
-        raise NotImplementedError()
+        client = self._client
+        key = self._normalize_key(key)
+        value = self.dumps(value)
+        if reverse:
+            return client.zrevrank(key, value)
+        return client.rank(key, value)
 
     def zrem(self, key, value):
         """Remove the `value` in sorted set
@@ -504,7 +650,7 @@ class Base(object):
         :returns: whether the `value` has been removed
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.zrem(self._normalize_key(key), self.dumps(value)) >= 0
 
     def zremrangebyrank(self, key, start, end, reverse=False):
         """Remove the values in sorted set with scores between `start` and `end`
@@ -516,7 +662,9 @@ class Base(object):
         :returns: the number of values removed
         :rtype: int
         """
-        raise NotImplementedError()
+        if reverse:
+            start, end = -end-1, -start-1
+        return self._client.zremrangebyrank(self._normalize_key(key), start, end)
 
     def zremrangebyscore(self, key, min, max):
         """Remove the values in sorted set with scores between `min` and `max`
@@ -527,7 +675,7 @@ class Base(object):
         :returns: the number of values removed
         :rtype: int
         """
-        raise NotImplementedError()
+        return self._client.zremrangebyscore(self._normalize_key(key), min, max)
 
     def zscore(self, key, value):
         """Return the score of `value` in sorted set
@@ -537,7 +685,7 @@ class Base(object):
         :returns: the score of `value` in sorted set `key` or None if not existed
         :rtype: float
         """
-        raise NotImplementedError()
+        return self._client.zscore(self._normalize_key(key), self.dumps(value))
 
     def zunionstore(self, dest, keys, aggregate=None):
         """Union multiple sorted sets into a new sorted set
@@ -548,28 +696,7 @@ class Base(object):
         :returns: the number of elements in the resulting sorted set at destination
         :rtype: int
         """
-        raise NotImplementedError()
-
-
-    ########################################
-    # Other
-    ########################################
-
-    def clear(self):
-        """Clears the cache. Not all caches support completely clearing the cache
-
-        :returns: Whether the cache been cleared.
-        :rtype: boolean
-        """
-        return True
-
-    @property
-    def raw_client(self):
-        """Get raw cache server client.
-
-        :returns: underlying cache client object.
-        """
-        return self._client
+        return self._client.zunionstore(self._normalize_key(dest), [self._normalize_key(k) for k in keys], aggregate)
 
     def expire(self, key, timeout):
         """Set a timeout on key. After the timeout has expired, the key will automatically be deleted.
@@ -579,4 +706,4 @@ class Base(object):
         :returns: True if timeout was set, False if key does not exist or timeout could not be set
         :rtype: boolean
         """
-        raise NotImplementedError()
+        return self._client.expire(self._normalize_key(key), timeout)

@@ -1,5 +1,6 @@
 import six
 import sys
+import platform
 
 _PY2 = sys.version_info[0] == 2
 
@@ -31,3 +32,14 @@ _numeric_types = six.integer_types + (float,)
 
 _DEFAULT_SOCKET_TIMEOUT = 3
 _DEFAULT_TIMEOUT = 60
+
+
+if platform.system().lower() == 'linux':
+    import socket
+    _TCP_KEEP_ALIVE_OPTIONS = {
+        socket.TCP_KEEPIDLE: 30,
+        socket.TCP_KEEPINTVL: 5,
+        socket.TCP_KEEPCNT: 5,
+    }
+else:
+    _TCP_KEEP_ALIVE_OPTIONS = {}

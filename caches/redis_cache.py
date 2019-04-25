@@ -1,22 +1,12 @@
 import pickle
-import platform
 
 import six
-
-if platform.system().lower() == 'linux':
-    import socket
-    _TCP_KEEP_ALIVE_OPTIONS = {
-        socket.TCP_KEEPIDLE: 30,
-        socket.TCP_KEEPINTVL: 5,
-        socket.TCP_KEEPCNT: 5,
-    }
-else:
-    _TCP_KEEP_ALIVE_OPTIONS = {}
 
 from .base import Base
 from . import _to_native
 from . import _DEFAULT_SOCKET_TIMEOUT
 from . import _DEFAULT_TIMEOUT
+from . import _TCP_KEEP_ALIVE_OPTIONS
 
 
 class Redis(Base):

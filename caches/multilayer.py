@@ -1,30 +1,21 @@
-import random
-
 from . import create_cache_client
 from .base import Base
 
 
-class Replication(Base):
-    """Cache with multiple caches
+class Multilayer(Base):
+    """A multilayer cache.
     """
-
-    def __init__(self, id, primary=None, caches=None, timeout=None):
+    def __init__(self, id, caches=None, timeout=None):
         Base.__init__(timeout)
         self._clients = []
         self._primary_cache = None
         self._id = id
-        caches = caches or {}
-        for i, name in enumerate(caches.keys()):
-            self._clients.append(create_cache_client(name, caches[name]))
-            if primary is not None and primary == name:
-                self._primary_cache = self._clients[i]
-
-    def get_client(self):
-        if self._primary_cache is not None:
-            return self._primary_cache
-        if not self._client:
-            return
-        return random.choice(self._clients)
+        if caches is None:
+            caches = []
+        for cache in caches:
+            self._clients.append(create_cache_client(cache.get('id'), cache))
+        self._primary_cache = self._clients[-1]
+        self._reversed_caches = self._clients[-2::-1]
 
     def set(self, key, value, timeout=None, noreply=False):
         """Add a new key/value to the cache (overwrite value, if key exists)
@@ -39,11 +30,11 @@ class Replication(Base):
         :rtype: boolean
         TODO: __set__
         """
-        result = True
-        for client in self._clients:
-            if not client.set(key, value, timeout, noreply):
-                result = False
-        return result
+        if not self._primary_cache.set(key, value, timeout, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.set(key, value, timeout, noreply)
+        return True
 
     def set_not_overwrite(self, key, value, timeout=None, noreply=False):
         """Works like :meth:`set` but does not overwrite the existing value
@@ -57,11 +48,11 @@ class Replication(Base):
         :returns: Whether the key existed and has been set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.set_not_overwrite(key, value, timeout, noreply):
-                result = False
-        return result
+        if not self._primary_cache.set_not_overwrite(key, value, timeout, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.set(key, value, timeout, noreply)
+        return True
 
     def set_many(self, timeout=None, noreply=False, **kw):
         """Sets multiple key-value pair
@@ -73,11 +64,11 @@ class Replication(Base):
         :returns: Whether all key-value pairs have been set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.set_many(data, timeout, noreply):
-                result = False
-        return result
+        if not self._primary_cache.set_many(data, timeout, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.set_many(data, timeout, noreply)
+        return True
 
     def get(self, key):
         """Look up the `key` in cache and return the value of it.
@@ -87,10 +78,12 @@ class Replication(Base):
 
         TODO: support __get__
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.get(key)
+        for i in range(0, len(self._clients)):
+            value = self._clients[i].get(key)
+            if value is not None:
+                for j in range(i-1, -1, -1):
+                    self._client[j].set(key, value)
+                return value
 
     def get_values(self, *keys):
         """Get valeus by keys
@@ -100,10 +93,7 @@ class Replication(Base):
         Share same error handling with :meth:`get`
         :param keys: the function acception multiple keys as positional arguments
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.get_values(keys)
+        return self._primary_cache.get_values(*keys)
 
     def get_key_to_value(self, *keys):
         """Like :meth:`get_values` but return a dict::
@@ -115,10 +105,7 @@ class Replication(Base):
 
         :param keys: The function accepts multiple keys as positional arguments
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.get_key_to_value(keys)
+        return self._primary_cache.get_key_to_value(*keys)
 
     def delete(self, key, noreply=False):
         """Delete `key` from cache.
@@ -130,11 +117,11 @@ class Replication(Base):
 
         TODO: __del__
         """
-        result = True
-        for client in self._clients:
-            if not client.delete(key, noreply):
-                result = False
-        return result
+        if not self._primary_cache.delete(key, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.delete(key, noreply)
+        return True
 
     def delete_many(self, noreply=False, *keys):
         """Delete multiple keys at once.
@@ -144,11 +131,11 @@ class Replication(Base):
         :returns: Whether all given keys have been deleted
         :rtype: boolen
         """
-        result = True
-        for client in self._clients:
-            if not client.delete_many(keys, noreply):
-                result = False
-        return result
+        if not self._primary_cache.delete_many(noreply, *keys):
+            return False
+        for client in self._reversed_caches:
+            client.delete_many(noreply, *keys)
+        return True
 
     def clear(self):
         """Clears the cache. Not all caches support completely clearing the cache
@@ -156,11 +143,11 @@ class Replication(Base):
         :returns: Whether the cache been cleared.
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.clear():
-                result = False
-        return result
+        if not self._primary_cache.clear():
+            return False
+        for client in self._reversed_caches:
+            client.clear()
+        return True
 
     def incr(self, key, delta=1, noreply=False):
         """Increments the value of a key by `delta`. If the key does not yet exists it is initialized with `delta`
@@ -172,11 +159,9 @@ class Replication(Base):
         :param noreply: instructs the server not reply
         :returns: The new value or ``None`` for backend errors.
         """
-        result = None
-        for client in self._clients:
-            result = client.incr(key, delta, noreply)
-            if result is None:  # Is this buggy?
-                return None
+        result = self._primary_cache.incr(key, delta, noreply)
+        for client in self._reversed_caches:
+            client.delete(key, noreply)
         return result
 
     def decr(self, key, delta=1, noreply=False):
@@ -189,11 +174,9 @@ class Replication(Base):
         :param noreply: instructs the server not reply
         :returns: The new value or `None` for backend errors.
         """
-        result = None
-        for client in self._clients:
-            result = client.decr(key, delta, noreply)
-            if result is None:
-                return None
+        result = self._primary_cache.decr(key, delta, noreply)
+        for client in self._reversed_caches:
+            client.delete(key, noreply)
         return result
 
     def block_left_pop(self, key, timeout=0):
@@ -203,10 +186,7 @@ class Replication(Base):
         :param timeout: blocking timeout, 0 means block indefinitely
         :returns: The popped value or None if timeout.
         """
-        result = None
-        for client in self._clients:
-            result = client.block_left_pop(key, timeout)
-        return result
+        return self._primary_cache.block_left_pop(key, timeout)
 
     def block_right_pop(self, key, timeout=0):
         """Blocking pop a value from the tail of the list.
@@ -215,10 +195,7 @@ class Replication(Base):
         :param timeout: blocking timeout, 0 means block indefinitely
         :returns: The popped value or None if timeout.
         """
-        result = None
-        for client in self._clients:
-            result = client.block_right_pop(key, timeout)
-        return result
+        return self._primary_cache.block_right_pop(key, timeout)
 
     def lindex(self, key, index):
         """Return the item from list at position `index`
@@ -227,10 +204,7 @@ class Replication(Base):
         :param index: the position, can be negative
         :returns: The value at position `index` or None of index is out of range
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.lindex(key, index)
+        return self._primary_cache.lindex(key, index)
 
     def llen(self, key):
         """Return the number of elements in list
@@ -239,10 +213,7 @@ class Replication(Base):
         :returns: number of elements in list
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return None
-        return client.llen(key)
+        return self._primary_cache.llen(key)
 
     def lpop(self, key):
         """Pop a value from the head of list
@@ -250,10 +221,7 @@ class Replication(Base):
         :param key: the key of list
         :returns: The popped value or None if list is empty
         """
-        result = None
-        for client in self._clients:
-            result = client.lpop(key)
-        return result
+        return self._primary_cache.lpop(key)
 
     def lpush(self, key, value):
         """Push a value to the head of the list
@@ -263,11 +231,7 @@ class Replication(Base):
         :returns: Whether the value has been added to list
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.lpush(key, value):
-                result = False
-        return result
+        return self._primary_cache.lpush(key, value)
 
     def lrange(self, key, start=0, end=-1):
         """Return a slice of the list
@@ -278,10 +242,7 @@ class Replication(Base):
         :returns: The values between `start` and `end`
         :rtype: list
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.lrange(key, start, end)
+        return self._primary_cache.lrange(key, start, end)
 
     def ltrim(self, key, start, end):
         """Trim the list, removing all values not within the slice
@@ -292,11 +253,7 @@ class Replication(Base):
         :returns: whether the list has been trimmed
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.ltrim(key, start, end):
-                result = False
-        return result
+        return self._primary_cache.ltrim(key, start, end)
 
     def rpop(self, key):
         """Pop a value from the tail of list
@@ -304,10 +261,7 @@ class Replication(Base):
         :param key: the key of list
         :returns: the popped value or None if list is empty
         """
-        result = None
-        for client in self._clients:
-            result = client.rpop(key)
-        return result
+        return self._primary_cache.rpop(key)
 
     def rpush(self, key, value):
         """Push a value to the tail of the list
@@ -317,11 +271,7 @@ class Replication(Base):
         :returns: whether the value has been added to list
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.rpush(key, value):
-                result = False
-        return result
+        return self._primary_cache.rpush(key, value)
 
     def sadd(self, key, value):
         """Add a value to the set
@@ -331,11 +281,7 @@ class Replication(Base):
         :returns: whether the value has been added to set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.sadd(key, value):
-                result = False
-        return result
+        return self._primary_cache.sadd(key, value)
 
     def sadd_many(self, key, *values):
         """Add multiple values to the set
@@ -345,11 +291,7 @@ class Replication(Base):
         :returns: whether the values has been added to set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.sadd_many(key, *values):
-                result = False
-        return result
+        return self._primary_cache.sadd_many(key, *values)
 
     def scard(self, key):
         """Return the number of elements in set
@@ -358,10 +300,7 @@ class Replication(Base):
         :returns: number of elements in set
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.scard(key)
+        return self._primary_cache.scard(key)
 
     def sismember(self, key, value):
         """Return whether the value is a member of set
@@ -371,10 +310,7 @@ class Replication(Base):
         :returns: whether the `value` is a member of a set
         :rtype: boolean
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.sismember(key, value)
+        return self._primary_cache.sismember(key, value)
 
     def smembers(self, key):
         """Return all the members of set
@@ -383,10 +319,7 @@ class Replication(Base):
         :returns: all the members value of set
         :rtype: set
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.smembers(key)
+       return self._primary_cache.smembers(key)
 
     def srandmember(self, key):
         """Randomly return a member of set
@@ -394,10 +327,7 @@ class Replication(Base):
         :param key: the key of set
         :returns: random member or None if empty
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.srandmember(key)
+        return self._primary_cache.srandmember(key)
 
     def srem(self, key, value):
         """Remove value from set
@@ -407,11 +337,7 @@ class Replication(Base):
         :returns: whether the `value` has been removed from set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.srem(key, value):
-                result = False
-        return result
+        return self._primary_cache.srem(key, value)
 
     def hgetall(self, key):
         """Look up hash in the cache and return all fields and values for it
@@ -420,10 +346,7 @@ class Replication(Base):
         :returns: The dict value of hash, if empty, return {}
         :rtype: dict
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.hgetall(key)
+        return self._primary_cache.hgetall(key)
 
     def hget(self, key, field):
         """Look up field in the hash and return the value of it.
@@ -432,10 +355,11 @@ class Replication(Base):
         :param field: the field in the hash to be lookup
         :returns: the value if exists else ``None``
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.hget(key, field)
+        for i in range(0, len(self._clients)):
+            value = self._clients[i].hget(key, field)
+            if value is not None:
+                for j in range(i-1, -1, -1):
+                    self._clients[j].hset(key, field, value)
 
     def hset(self, key, field, value, timeout=None, noreply=False):
         """Add a new field/value to the hash in cache (overwrite value if exists)
@@ -451,11 +375,11 @@ class Replication(Base):
         :returns: whether the key existed and has been set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.hset(key, field, value, timeout, noreply):
-                result = False
-        return result
+        if not self._primary_cache.hset(key, field, value, timeout, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.hset(key, field, value, timeout, noreply)
+        return True
 
     def hdel(self, key, field, noreply=False):
         """Delete field of hash from the cache
@@ -466,11 +390,11 @@ class Replication(Base):
         :returns: whether the key has been deleted
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.hdel(key, field, noreply):
-                result = False
-        return result
+        if not self._primary_cache.hdel(key, field, noreply):
+            return False
+        for client in self._reversed_caches:
+            client.hdel(key, field, noreply)
+        return True
 
     def hexists(self, key, field):
         """Check whether `field` is an existing field in the hash
@@ -480,10 +404,7 @@ class Replication(Base):
         :returns: whether `field` is an existing field in the hash
         :rtype: boolean
         """
-        client = self.get_client()
-        if client is None:
-            return None
-        return client.hexists(key, field)
+        return self._primary_cache.hexists(key, field)
 
     def hlen(self, key):
         """Get number of fields contained in the hash
@@ -492,10 +413,7 @@ class Replication(Base):
         :returns: the number of fields contained in the hash
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.hlen(key)
+        return self._primary_cache.hlen(key)
 
     def zadd(self, key, value, score):
         """Add value to sorted set.
@@ -506,11 +424,7 @@ class Replication(Base):
         :returns: Whether the value has been set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.zadd(key, value, score):
-                result = False
-        return result
+        return self._primary_cache.zadd(key, value, score)
 
     def zcard(self, key):
         """Return the number of values in sorted set
@@ -519,10 +433,7 @@ class Replication(Base):
         :returns: the number of values in sorted set
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.zcard(key)
+        return self._primary_cache.zcard(key)
 
     def zcount(self, key, min, max):
         """Returns the number of values in the sorted set `key` with a score between `min` and `max`
@@ -533,10 +444,7 @@ class Replication(Base):
         :returns: the number of values
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.zcount(key, min, max)
+        return self._primary_cache.zcount(key, min, max)
 
     def zincrby(self, key, value, delta=1):
         """Increment the score of `value` in sorted set `key` by `delta`
@@ -547,10 +455,7 @@ class Replication(Base):
         :returns: the new score
         :rtype: int
         """
-        result = True
-        for client in self._clients:
-            result = client.zincrby(key, value, delta)
-        return result
+        return self._primary_cache.zincrby(key, value, delta)
 
     def zrange(self, key, start=0, end=-1, reverse=False, withscores=False):
         """Return a range of values from sorted set `key` between `start` and `end`
@@ -562,10 +467,7 @@ class Replication(Base):
         :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
         :rtype: list
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.zrange(key, start, end, reverse, withscores)
+        return self._primary_cache.zrange(key, start, end, reverse, withscores)
 
     def zrangebyscore(self, key, min, max, start=None, num=None, reverse=False, withscores=False):
         """Return a range of values from sorted set `key` with scores between `min` and `max`
@@ -580,10 +482,7 @@ class Replication(Base):
         :returns: if withscores is True, return a list of (value, score) pairs, otherwise return a list of values
         :rtype: list
         """
-        client = self.get_client()
-        if client is None:
-            return None
-        return client.zrangebyscore(key, min, max, start, num, reverse, withscores)
+        return self._primary_cache.zrangebyscore(key, min, max, start, num, reverse, withscores)
 
     def zrank(self, key, value, reverse=False):
         """Return the rank of `value` in sorted set
@@ -594,10 +493,7 @@ class Replication(Base):
         :returns: the rank of `value` in sorted set `key` or None if not existed
         :rtype: int
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.zrank(key, value, reverse)
+        return self._primary_cache.zrank(key, value, reverse)
 
     def zrem(self, key, value):
         """Remove the `value` in sorted set
@@ -607,11 +503,7 @@ class Replication(Base):
         :returns: whether the `value` has been removed
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.zrem(key, value):
-                result = False
-        return result
+        return self._primary_cache.zrem(key, value)
 
     def zremrangebyrank(self, key, start, end, reverse=False):
         """Remove the values in sorted set with scores between `start` and `end`
@@ -623,12 +515,7 @@ class Replication(Base):
         :returns: the number of values removed
         :rtype: int
         """
-        result = 0
-        for client in self._clients:
-            client_result = client.zremrangebyrank(key, start, end, reverse)
-            if client_result > result:
-                result = client_result
-        return result
+        return self._primary_cache.zremrangebyrank(key, start, end, reverse)
 
     def zremrangebyscore(self, key, min, max):
         """Remove the values in sorted set with scores between `min` and `max`
@@ -639,12 +526,7 @@ class Replication(Base):
         :returns: the number of values removed
         :rtype: int
         """
-        result = 0
-        for client in self._clients:
-            client_result = client.zremrangebyscore(key, min, max)
-            if client_result > result:
-                result = client_result
-        return result
+        return self._primary_cache.zremrangebescore(key, min, max)
 
     def zscore(self, key, value):
         """Return the score of `value` in sorted set
@@ -654,10 +536,7 @@ class Replication(Base):
         :returns: the score of `value` in sorted set `key` or None if not existed
         :rtype: float
         """
-        client = self.get_client()
-        if client is None:
-            return
-        return client.zscore(key, value)
+        return self._primary_cache.zscore(key, value)
 
     def zunionstore(self, dest, keys, aggregate=None):
         """Union multiple sorted sets into a new sorted set
@@ -668,10 +547,7 @@ class Replication(Base):
         :returns: the number of elements in the resulting sorted set at destination
         :rtype: int
         """
-        result = None
-        for client in self._clients:
-            result = client.zunionstore(dest, keys, aggregate)
-        return result
+        return self._primary_cache.zunionstore(dest, keys, aggregate)
 
     def expire(self, key, timeout):
         """Set a timeout on key. After the timeout has expired, the key will automatically be deleted.
@@ -681,10 +557,4 @@ class Replication(Base):
         :returns: True if timeout was set, False if key does not exist or timeout could not be set
         :rtype: boolean
         """
-        result = True
-        for client in self._clients:
-            if not client.expire(key, timeout):
-                result = False
-        return result
-
-
+        return self._primary_cache.expire(key, timeout)

@@ -43,3 +43,28 @@ if platform.system().lower() == 'linux':
     }
 else:
     _TCP_KEEP_ALIVE_OPTIONS = {}
+
+
+def create_cache_client():
+    """
+    _cache_classes = {
+    	'null': NullCache,
+    	'memory': MemoryCache,
+    	'memcached': MemcachedCache,
+    	'pymemcached': PyMemcachedCache,
+    	'redis': RedisCache,
+    	'rawredis': RawRedisCache,
+    	'ssdb': SsdbCache,
+    	'replication': ReplicationCache,
+    	'distribution': DistributionCache,
+    	'multilayer': MultilayerCache,
+    }
+
+    def create_cache_client(cache_id, config):
+    	cache_type = config['type']
+    	config['id'] = cache_id
+    	if cache_type not in _cache_classes:
+    		raise RuntimeError('unknown_cache_type: %s' % cache_type)
+    	return _cache_classes[cache_type](config)
+    """
+    pass
